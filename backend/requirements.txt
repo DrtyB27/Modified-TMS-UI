@@ -1,0 +1,6 @@
+flask>=3.0
+flask-cors>=4.0
+requests>=2.31
+cryptography>=41
+# playwright is only needed for live 3G login (not for fixtures mode):
+#   pip install playwright && playwright install chromium
