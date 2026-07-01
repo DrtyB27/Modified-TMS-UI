@@ -39,15 +39,25 @@ function isReadOnly(path) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
+    const cors = corsHeaders(request, env)
+
+    // CORS preflight (frontend on a Pages domain calling the Worker).
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: cors })
+    }
 
     // Never allow this Worker to be pointed at production.
     if (env.TMS_ORIGIN && env.TMS_ORIGIN.startsWith(PRODUCTION_ORIGIN)) {
-      return json({ error: 'This Worker is sandbox-only.' }, 403)
+      return json({ error: 'This Worker is sandbox-only.' }, 403, cors)
     }
     const origin = env.TMS_ORIGIN || SANDBOX_ORIGIN
 
     if (url.pathname === '/api/health') {
-      return json({ ok: true, mode: 'worker', host: new URL(origin).host })
+      return json({
+        ok: true,
+        mode: env.BACKEND_URL ? 'worker->backend' : (env.TMS_SESSION_COOKIE ? 'worker-live' : 'worker-unconfigured'),
+        host: new URL(origin).host,
+      }, 200, cors)
     }
 
     // Map the public API onto the read-only 3G endpoints.
@@ -56,18 +66,20 @@ export default {
       '/api/orders': '/web/orderList',
     }[url.pathname]
 
-    if (!route) return json({ error: 'not found' }, 404)
-    if (!isReadOnly(route)) return json({ error: 'read-only violation' }, 403)
+    if (!route) return json({ error: 'not found' }, 404, cors)
+    if (!isReadOnly(route)) return json({ error: 'read-only violation' }, 403, cors)
 
     // Preferred: hand off to the Flask backend (which does the Playwright login).
     if (env.BACKEND_URL) {
       const target = new URL(url.pathname + url.search, env.BACKEND_URL)
-      return fetch(target, { headers: { accept: 'application/json' } })
+      const r = await fetch(target, { headers: { accept: 'application/json' } })
+      return withCors(r, cors)
     }
 
-    // Alt: direct sandbox call using an injected session cookie secret.
+    // Live (Cloudflare-native): direct sandbox call using an injected session
+    // cookie secret. Refresh the cookie with skills/3g-tms-browser/refresh_session.py.
     if (!env.TMS_SESSION_COOKIE) {
-      return json({ error: 'No BACKEND_URL or TMS_SESSION_COOKIE configured.' }, 500)
+      return json({ error: 'No BACKEND_URL or TMS_SESSION_COOKIE configured.' }, 500, cors)
     }
     const page = url.searchParams.get('page') || '1'
     const pageSize = url.searchParams.get('pageSize') || '50'
@@ -80,7 +92,7 @@ export default {
     })
     if (route === '/web/loadList/tab0') {
       const sq = url.searchParams.get('savedQueryId')
-      if (!sq) return json({ error: 'savedQueryId required' }, 400)
+      if (!sq) return json({ error: 'savedQueryId required' }, 400, cors)
       body.set('savedQueryId', sq)
     }
 
@@ -93,17 +105,46 @@ export default {
       },
       body,
     })
+    // A 3G session that has expired redirects to /login (HTML). Surface that as
+    // a clear 401 so the operator knows to refresh TMS_SESSION_COOKIE.
     const text = await resp.text()
+    const looksLikeLogin = /<html/i.test(text) && /login/i.test(text)
+    if (resp.status >= 400 || looksLikeLogin) {
+      return json({
+        error: looksLikeLogin
+          ? 'Sandbox session expired — refresh TMS_SESSION_COOKIE (refresh_session.py).'
+          : `3G returned ${resp.status}`,
+      }, looksLikeLogin ? 401 : 502, cors)
+    }
     return new Response(text, {
       status: resp.status,
-      headers: { 'content-type': 'application/json' },
+      headers: { ...cors, 'content-type': 'application/json' },
     })
   },
 }
 
-function json(obj, status = 200) {
+// CORS: allow the configured Pages origin (ALLOWED_ORIGIN) or fall back to the
+// request Origin. This is our own proxy talking to our own frontend — never 3G.
+function corsHeaders(request, env) {
+  const reqOrigin = request.headers.get('Origin') || ''
+  const allow = env.ALLOWED_ORIGIN || reqOrigin || '*'
+  return {
+    'access-control-allow-origin': allow,
+    'access-control-allow-methods': 'GET,OPTIONS',
+    'access-control-allow-headers': 'content-type',
+    'vary': 'Origin',
+  }
+}
+
+function withCors(resp, cors) {
+  const h = new Headers(resp.headers)
+  for (const [k, v] of Object.entries(cors)) h.set(k, v)
+  return new Response(resp.body, { status: resp.status, headers: h })
+}
+
+function json(obj, status = 200, extra = {}) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...extra },
   })
 }

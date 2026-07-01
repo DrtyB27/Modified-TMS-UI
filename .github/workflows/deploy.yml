@@ -1,0 +1,64 @@
+name: Deploy (Cloudflare Pages + Worker) — sandbox wireframe
+
+# Full-stack deploy for the read-only 3G sandbox wireframe:
+#   - frontend  -> Cloudflare Pages
+#   - /api      -> the separate, sandbox-only Cloudflare Worker
+#
+# SANDBOX ONLY. This never touches production 3G or the B.R.A.T. production
+# Worker. The live session cookie (TMS_SESSION_COOKIE) is NOT set here — rotate
+# it out-of-band with skills/3g-tms-browser/refresh_session.py, which needs
+# egress to the sandbox that CI runners may not have.
+#
+# Required repo secrets:
+#   CLOUDFLARE_API_TOKEN   token scoped to Pages + Workers edit
+#   CLOUDFLARE_ACCOUNT_ID  target account
+# Optional repo variable:
+#   PAGES_PROJECT          Pages project name (default: dlx-tms-wireframe)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "cloudflare/**"
+      - ".github/workflows/deploy.yml"
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cloudflare
+          command: deploy
+
+  pages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          # Same-origin API by default; override if the Worker is on its own domain.
+          VITE_API_BASE: ${{ vars.VITE_API_BASE || '/api' }}
+        run: |
+          npm ci
+          npm run build
+      - name: Deploy Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy frontend/dist
+            --project-name=${{ vars.PAGES_PROJECT || 'dlx-tms-wireframe' }}

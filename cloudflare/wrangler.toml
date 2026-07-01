@@ -9,7 +9,17 @@ compatibility_date = "2025-01-01"
 [vars]
 # Sandbox host ONLY. The Worker refuses to run against production.
 TMS_ORIGIN = "https://shipdlx-sb.3gtms.com"
+# Origin allowed to call the Worker via CORS (your Cloudflare Pages URL).
+# Set to your Pages domain, e.g. "https://dlx-tms-wireframe.pages.dev".
+# Not needed if the Worker is routed same-origin under the Pages domain (/api/*).
+ALLOWED_ORIGIN = ""
+
+# To serve the API same-origin under the Pages domain (recommended), add a route
+# on your custom domain and uncomment:
+# routes = [
+#   { pattern = "wireframe.example.com/api/*", zone_name = "example.com" },
+# ]
 
 # Secrets (set via `wrangler secret put`, never committed):
-#   BACKEND_URL          preferred: URL of the Flask proxy (does Playwright login)
-#   TMS_SESSION_COOKIE   alt: an injected sandbox session cookie for direct calls
+#   TMS_SESSION_COOKIE   live: sandbox session cookie (refresh_session.py)
+#   BACKEND_URL          alt:  URL of a Flask proxy that does the Playwright login

@@ -21,3 +21,11 @@ wrangler deploy
 The auth handling here was **seeded from** the B.R.A.T. Worker but is its own
 deployment. For local dev you usually don't need this Worker at all — the Vite
 dev server proxies `/api` straight to Flask.
+
+## Live mode (Cloudflare-native)
+
+The Worker can't run Playwright, so live data uses an injected
+`TMS_SESSION_COOKIE` secret, rotated by
+`../skills/3g-tms-browser/refresh_session.py`. It refuses production, enforces
+read-only, and returns `401` when the session expires (time to re-run the
+refresh helper). Full runbook: **[`../DEPLOY.md`](../DEPLOY.md)**.

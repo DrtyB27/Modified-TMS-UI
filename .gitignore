@@ -17,4 +17,5 @@ credentials.enc
 orderlist_capture.json
 .env
 .env.*
+!.env.example
 .dev.vars
