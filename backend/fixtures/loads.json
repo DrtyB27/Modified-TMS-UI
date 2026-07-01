@@ -1,0 +1,66 @@
+{
+  "_note": "Illustrative sample of the Load shape returned by POST /web/loadList/tab0. Field names match the confirmed Load reference (a Load has ~588 fields; only the wireframe-relevant subset is shown). Used only for offline/dev rendering when USE_FIXTURES=1. NOT real sandbox data.",
+  "Rows": [
+    {
+      "loadNum": "L-100482",
+      "status": "Planned",
+      "ordCount": 3,
+      "wtUtilizationPercent": 87.4,
+      "volUtilizationPercent": 72.1,
+      "originCity": "Kansas City",
+      "originState": "MO",
+      "destCity": "Dallas",
+      "destState": "TX",
+      "carrierName": "Werner Enterprises"
+    },
+    {
+      "loadNum": "L-100483",
+      "status": "Tendered",
+      "ordCount": 1,
+      "wtUtilizationPercent": 41.9,
+      "volUtilizationPercent": 55.0,
+      "originCity": "Chicago",
+      "originState": "IL",
+      "destCity": "Minneapolis",
+      "destState": "MN",
+      "carrierName": "J.B. Hunt"
+    },
+    {
+      "loadNum": "L-100487",
+      "status": "In Transit",
+      "ordCount": 5,
+      "wtUtilizationPercent": 96.2,
+      "volUtilizationPercent": 88.7,
+      "originCity": "Atlanta",
+      "originState": "GA",
+      "destCity": "Charlotte",
+      "destState": "NC",
+      "carrierName": "Schneider National"
+    },
+    {
+      "loadNum": "L-100491",
+      "status": "Open",
+      "ordCount": 0,
+      "wtUtilizationPercent": 0.0,
+      "volUtilizationPercent": 0.0,
+      "originCity": "Denver",
+      "originState": "CO",
+      "destCity": "Salt Lake City",
+      "destState": "UT",
+      "carrierName": ""
+    },
+    {
+      "loadNum": "L-100495",
+      "status": "Delivered",
+      "ordCount": 2,
+      "wtUtilizationPercent": 63.5,
+      "volUtilizationPercent": 78.3,
+      "originCity": "Los Angeles",
+      "originState": "CA",
+      "destCity": "Phoenix",
+      "destState": "AZ",
+      "carrierName": "Knight-Swift"
+    }
+  ],
+  "TotalRows": 5
+}

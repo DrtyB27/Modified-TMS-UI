@@ -1,0 +1,15 @@
+# SEPARATE, NEW Worker for the DLX 3G sandbox wireframe.
+# Do NOT merge this into the B.R.A.T. production rating Worker — deploy it as its
+# own Worker with its own name/route/secrets. Sandbox traffic stays isolated.
+
+name = "dlx-tms-sandbox-wireframe"   # distinct from any B.R.A.T. Worker name
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Sandbox host ONLY. The Worker refuses to run against production.
+TMS_ORIGIN = "https://shipdlx-sb.3gtms.com"
+
+# Secrets (set via `wrangler secret put`, never committed):
+#   BACKEND_URL          preferred: URL of the Flask proxy (does Playwright login)
+#   TMS_SESSION_COOKIE   alt: an injected sandbox session cookie for direct calls
