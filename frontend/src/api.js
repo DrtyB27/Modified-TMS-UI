@@ -1,5 +1,7 @@
-// All 3G access goes through the backend proxy — the browser never calls 3G.
-const BASE = '/api'
+// All 3G access goes through the proxy (Flask in dev, the Cloudflare Worker in
+// prod) — the browser never calls 3G directly. Same-origin '/api' by default;
+// override with VITE_API_BASE when the Worker lives on a different origin.
+const BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '')
 
 async function getJson(path) {
   const res = await fetch(`${BASE}${path}`)

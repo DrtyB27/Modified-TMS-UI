@@ -44,6 +44,12 @@ python capture_orderlist.py --headed    # capture the undocumented /web/orderLis
 #        open http://localhost:5173/?savedQueryId=<realSavedQueryId>
 ```
 
+## Deploy (Cloudflare Pages + Worker, live sandbox)
+
+Full-stack Cloudflare deploy — Pages for the UI, the separate sandbox-only
+Worker for `/api`, live data via a rotated session cookie. See
+**[`DEPLOY.md`](DEPLOY.md)**. CI: `.github/workflows/deploy.yml`.
+
 ## ⚠️ What is NOT done yet, and why
 
 This scaffolding was built in an environment whose **network policy blocks
