@@ -23,9 +23,12 @@ export class Backend extends Container {
     USE_FIXTURES: '0',
     LOGIN_REQUIRED: '1',
     FORCE_SECURE_COOKIE: '1',
-    // If the frontend (Pages) is a different origin than this Worker, set this
-    // to the exact Pages URL so credentialed CORS works. Same-origin route -> unset.
-    // FRONTEND_ORIGIN: 'https://dlx-tms-wireframe.pages.dev',
+    // Cross-origin setup (frontend on *.pages.dev, this Worker on *.workers.dev):
+    // set these so the session cookie survives cross-site and CORS is credentialed.
+    // FRONTEND_ORIGIN: 'https://modified-tms-ui.pages.dev',
+    // COOKIE_SAMESITE: 'None',
+    // For a same-origin custom domain (/api routed under the Pages domain) leave
+    // both unset (SameSite defaults to Lax, no CORS needed).
   }
 }
 

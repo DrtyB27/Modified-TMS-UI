@@ -5,7 +5,20 @@ const BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '')
 
 // credentials:'include' sends the httpOnly session cookie (needed cross-origin).
 async function req(path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, { credentials: 'include', ...opts })
+  let res
+  try {
+    res = await fetch(`${BASE}${path}`, { credentials: 'include', ...opts })
+  } catch {
+    throw new Error(`Can't reach the API proxy at ${BASE}. Is the backend deployed?`)
+  }
+  const ct = res.headers.get('content-type') || ''
+  if (!ct.includes('application/json')) {
+    // A static host (e.g. Pages with no /api backend) returns the SPA HTML here.
+    throw new Error(
+      `API proxy not connected: ${BASE}${path} returned ${res.status} (${ct || 'no content-type'}). ` +
+      `Deploy the backend and route ${BASE} to it.`,
+    )
+  }
   const body = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`)
   return body

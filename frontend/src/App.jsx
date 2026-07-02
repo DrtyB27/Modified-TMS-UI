@@ -12,16 +12,21 @@ const SAVED_QUERY_ID = new URLSearchParams(location.search).get('savedQueryId') 
 export default function App() {
   const [session, setSession] = useState(null) // {authenticated, mode, loginRequired, user}
   const [booting, setBooting] = useState(true)
+  const [setupError, setSetupError] = useState(null)
 
   useEffect(() => {
     fetchSession()
       .then(setSession)
-      .catch(() => setSession({ authenticated: false, mode: 'unknown', loginRequired: true }))
+      .catch((e) => setSetupError(e.message))
       .finally(() => setBooting(false))
   }, [])
 
   if (booting) {
     return <div className="p-6 text-sm text-slate-500">Loading…</div>
+  }
+
+  if (setupError) {
+    return <SetupNotice message={setupError} />
   }
 
   const needsLogin = session.loginRequired && !session.authenticated
@@ -129,4 +134,25 @@ function Dashboard({ session, onLogout }) {
 
 function Empty({ label }) {
   return <p className="px-2 py-8 text-center text-sm text-slate-400">{label}</p>
+}
+
+function SetupNotice({ message }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+      <div className="w-full max-w-md rounded-xl border border-amber-200 bg-white p-6 shadow-sm">
+        <h1 className="text-base font-bold text-slate-900">Backend not connected</h1>
+        <p className="mt-1 text-xs text-slate-500">
+          The UI is deployed, but the <span className="font-mono">/api</span>{' '}
+          proxy isn’t reachable yet.
+        </p>
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {message}
+        </p>
+        <p className="mt-3 text-[11px] leading-relaxed text-slate-400">
+          Deploy the backend container (<span className="font-mono">cloudflare/containers</span>)
+          and route <span className="font-mono">/api/*</span> to it, then reload. See DEPLOY.md.
+        </p>
+      </div>
+    </div>
+  )
 }
