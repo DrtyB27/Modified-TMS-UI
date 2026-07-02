@@ -42,6 +42,27 @@ when the Worker is routed **same-origin** under the Pages domain (`/api/*`); if
 the Worker is on its own domain, set `ALLOWED_ORIGIN` to the Pages URL and note
 the session cookie must be `SameSite=None; Secure` to survive cross-site.
 
+## Connecting Pages (`*.pages.dev`) to the backend — same-origin proxy
+
+You can't attach a Worker route to a `*.pages.dev` domain, and calling the
+backend Worker cross-origin uses a **third-party cookie** (blocked by Safari and
+increasingly Chrome — the login won't stick). The fix, with no custom domain, is
+the bundled **Pages Function** at `frontend/functions/api/[[path]].js`: it runs
+on the Pages origin and forwards `/api/*` to the backend Worker server-side, so
+the session cookie stays first-party.
+
+Setup:
+1. Deploy the backend container (below) → note its
+   `https://dlx-tms-sandbox-backend.<account>.workers.dev` URL.
+2. In the Pages project → Settings → Environment variables, set
+   `BACKEND_ORIGIN = https://dlx-tms-sandbox-backend.<account>.workers.dev`
+   and **Retry deployment**.
+3. Leave `VITE_API_BASE` unset (defaults to same-origin `/api`). No CORS or
+   `SameSite=None` needed — it's all first-party.
+
+(If you later add a custom domain, you can drop the Function and route the Worker
+at `yourdomain/api/*` instead.)
+
 ## Host the backend on Cloudflare Containers (recommended for the login screen)
 
 Runs the Flask + Playwright backend as a Cloudflare Container behind a router
