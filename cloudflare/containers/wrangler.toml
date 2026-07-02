@@ -1,0 +1,31 @@
+# Cloudflare Containers deployment of the read-only 3G sandbox backend.
+# SEPARATE, sandbox-only Worker+Container. Never the B.R.A.T. production Worker.
+#
+# `wrangler deploy` here builds ../../Dockerfile, pushes the image, and deploys
+# the router Worker bound to the container. Requires Docker locally (or a CI
+# runner with Docker).
+
+name = "dlx-tms-sandbox-backend"
+main = "worker.js"
+# Containers need a recent runtime + Node compat.
+compatibility_date = "2025-09-15"
+compatibility_flags = ["nodejs_compat"]
+
+[[containers]]
+class_name = "Backend"
+image = "../../Dockerfile"       # build context is the repo root
+max_instances = 1                # single instance: in-memory sessions stay consistent
+# Chromium is memory-hungry — use a larger instance. Check `wrangler containers
+# instances` for the sizes available on your account and adjust.
+instance_type = "standard"
+
+[[durable_objects.bindings]]
+name = "BACKEND"
+class_name = "Backend"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Backend"]
+
+# No secrets are needed: credentials arrive at runtime via the login screen and
+# are never stored. (Container env is set in the Backend class `envVars`.)

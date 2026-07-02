@@ -96,11 +96,17 @@ def _current_session():
 
 
 def _set_cookie(resp, token: str):
+    # SameSite=Lax for same-origin/same-site (custom domain). For a cross-site
+    # setup (frontend on *.pages.dev, backend on *.workers.dev) set
+    # COOKIE_SAMESITE=None — which the browser only honors on a Secure cookie,
+    # so FORCE_SECURE_COOKIE=1 must be set too.
+    samesite = os.environ.get("COOKIE_SAMESITE", "Lax")
+    secure = request.is_secure or os.environ.get("FORCE_SECURE_COOKIE") == "1"
     resp.set_cookie(
         SESSION_COOKIE, token,
         httponly=True,
-        samesite="Lax",
-        secure=request.is_secure or os.environ.get("FORCE_SECURE_COOKIE") == "1",
+        samesite=samesite,
+        secure=secure or samesite == "None",
         max_age=SESSION_TTL,
         path="/",
     )

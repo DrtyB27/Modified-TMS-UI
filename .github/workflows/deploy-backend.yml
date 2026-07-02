@@ -1,0 +1,34 @@
+name: Deploy backend container (Cloudflare Containers)
+
+# Builds ../../Dockerfile and deploys the router Worker + Container that powers
+# the login screen. Manual trigger only — it builds a Chromium image (large) and
+# needs Docker on the runner (GitHub-hosted ubuntu has it).
+#
+# SANDBOX ONLY. Separate from the B.R.A.T. production Worker. No 3G credentials
+# are set here — they arrive at runtime via the login screen.
+#
+# Required repo secrets:
+#   CLOUDFLARE_API_TOKEN   token with Workers Scripts + Containers edit
+#   CLOUDFLARE_ACCOUNT_ID
+
+on:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install deps
+        working-directory: cloudflare/containers
+        run: npm install
+      - name: Deploy Worker + Container
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cloudflare/containers
+          command: deploy
