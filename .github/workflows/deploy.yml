@@ -9,7 +9,13 @@ name: Deploy (Cloudflare Pages + Worker) — sandbox wireframe
 # it out-of-band with skills/3g-tms-browser/refresh_session.py, which needs
 # egress to the sandbox that CI runners may not have.
 #
-# Required repo secrets:
+# NOTE: The live deployment now uses Cloudflare Pages *Git integration* (Pages
+# builds from GitHub directly) for the frontend and Cloudflare Containers for the
+# backend (see cloudflare/containers + DEPLOY.md). This wrangler-based Pages+Worker
+# workflow is superseded and kept only as a manual (workflow_dispatch) option —
+# it no longer auto-fires on push, so it can't fail on main without secrets.
+#
+# Required repo secrets (only if you run it manually):
 #   CLOUDFLARE_API_TOKEN   token scoped to Pages + Workers edit
 #   CLOUDFLARE_ACCOUNT_ID  target account
 # Optional repo variable:
@@ -17,12 +23,6 @@ name: Deploy (Cloudflare Pages + Worker) — sandbox wireframe
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "frontend/**"
-      - "cloudflare/**"
-      - ".github/workflows/deploy.yml"
 
 jobs:
   worker:
