@@ -17,6 +17,15 @@ calls 3G directly.
 A badge in the header shows whether data is **LIVE SANDBOX** or **FIXTURES
 (offline)**.
 
+## Login screen
+
+When the backend requires login (live mode, or `LOGIN_REQUIRED=1` in fixtures
+for a demo), the app shows a sign-in screen first. Credentials are posted to the
+proxy's `POST /api/login`, which opens the 3G sandbox session; the browser keeps
+only an `httpOnly` session cookie (fetches use `credentials: 'include'`). A
+**Sign out** button and the signed-in user show in the header. In fixtures mode
+any username/password signs in and shows sample data.
+
 ## Live loads
 
 Loads are scoped by a saved query. Pass one via the URL:

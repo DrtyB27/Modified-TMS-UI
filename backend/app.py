@@ -1,28 +1,40 @@
 """
-Minimal read-only proxy between the wireframe frontend and 3G TMS (sandbox).
+Minimal read-only proxy between the wireframe frontend and 3G TMS (sandbox),
+now with a login flow so credentials are entered in the UI instead of being
+pre-encrypted on disk.
 
-The browser NEVER talks to 3G directly (cookie/session auth won't survive a
-cross-origin XHR). It talks only to this proxy, which uses the extended
-3g-tms-browser skill to fetch Loads and Orders from the sandbox.
+Flow:
+    Browser login screen --POST /api/login {username,password}--> this backend
+    --Playwright login--> 3G sandbox. The backend keeps only the resulting
+    session (server-side, in memory) and hands the browser an opaque httpOnly
+    cookie. The password is used once and never stored or logged.
+
+The browser NEVER talks to 3G directly. In the Cloudflare deploy the Worker
+proxies /api/* to this backend (BACKEND_URL) because a Worker can't run
+Playwright.
 
 Endpoints:
-    GET /api/health
-    GET /api/loads?savedQueryId=<id>&page=<n>&pageSize=<n>
-    GET /api/orders?page=<n>&pageSize=<n>
+    GET  /api/health
+    GET  /api/session            -> {authenticated, mode, loginRequired}
+    POST /api/login  {username, password}
+    POST /api/logout
+    GET  /api/loads?savedQueryId=&page=&pageSize=
+    GET  /api/orders?page=&pageSize=
 
-Offline/dev mode:
-    Set USE_FIXTURES=1 (default when no credentials are configured) to serve
-    the JSON fixtures in ./fixtures instead of calling 3G. This is what lets the
-    wireframe render in environments -- like the build sandbox -- where egress
-    to shipdlx-sb.3gtms.com is blocked.
+Modes:
+    USE_FIXTURES=1  -> serve local fixtures (offline). With LOGIN_REQUIRED=1 the
+                       login gate is still shown (demo: any non-empty creds).
+    otherwise       -> live sandbox: login required; list calls use the caller's
+                       authenticated session.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import secrets
 import sys
-from functools import lru_cache
+import time
 from pathlib import Path
 
 from flask import Flask, jsonify, request
@@ -33,81 +45,170 @@ SKILL_DIR = Path(__file__).resolve().parent.parent / "skills" / "3g-tms-browser"
 sys.path.insert(0, str(SKILL_DIR))
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+SESSION_COOKIE = "tms_session"
+SESSION_TTL = int(os.environ.get("SESSION_TTL_SECONDS", 12 * 3600))
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})  # wireframe is same-machine dev
+
+# Credentialed CORS: with cookies, the allowed origin can't be "*". Set
+# FRONTEND_ORIGIN to your Pages URL for cross-origin prod; same-origin dev
+# (Vite proxy) needs no CORS at all.
+_frontend_origin = os.environ.get("FRONTEND_ORIGIN", "*")
+CORS(
+    app,
+    resources={r"/api/*": {"origins": _frontend_origin}},
+    supports_credentials=(_frontend_origin != "*"),
+)
+
+# token -> {"client": TmsClient|None, "created": float, "user": str}
+_SESSIONS: dict[str, dict] = {}
 
 
-def _use_fixtures() -> bool:
-    if os.environ.get("USE_FIXTURES") == "1":
-        return True
-    if os.environ.get("USE_FIXTURES") == "0":
-        return False
-    # Auto: fall back to fixtures if credentials aren't configured.
-    try:
-        from credentials import load_credentials  # noqa: F401
-        load_credentials()
-        return False
-    except Exception:
-        return True
+def _mode() -> str:
+    return "fixtures" if os.environ.get("USE_FIXTURES") == "1" else "live"
+
+
+def _login_required() -> bool:
+    return _mode() == "live" or os.environ.get("LOGIN_REQUIRED") == "1"
 
 
 def _fixture(name: str):
     return json.loads((FIXTURES / name).read_text())
 
 
-@lru_cache(maxsize=1)
-def _client():
-    """Build and authenticate a TmsClient once, reuse the session."""
-    from credentials import load_credentials
-    from tms_client import TmsClient
+def _new_session(user: str, client) -> str:
+    token = secrets.token_urlsafe(32)
+    _SESSIONS[token] = {"client": client, "created": time.time(), "user": user}
+    return token
 
-    creds = load_credentials()
-    client = TmsClient(sandbox=True)  # sandbox-only, enforced in the client
-    client.login(creds["username"], creds["password"])
-    return client
+
+def _current_session():
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None, None
+    sess = _SESSIONS.get(token)
+    if not sess:
+        return token, None
+    if time.time() - sess["created"] > SESSION_TTL:
+        _SESSIONS.pop(token, None)
+        return token, None
+    return token, sess
+
+
+def _set_cookie(resp, token: str):
+    resp.set_cookie(
+        SESSION_COOKIE, token,
+        httponly=True,
+        samesite="Lax",
+        secure=request.is_secure or os.environ.get("FORCE_SECURE_COOKIE") == "1",
+        max_age=SESSION_TTL,
+        path="/",
+    )
+    return resp
 
 
 @app.get("/api/health")
 def health():
+    return jsonify({"ok": True, "mode": _mode(), "host": "shipdlx-sb.3gtms.com"})
+
+
+@app.get("/api/session")
+def session():
+    _, sess = _current_session()
     return jsonify({
-        "ok": True,
-        "mode": "fixtures" if _use_fixtures() else "live-sandbox",
-        "host": "shipdlx-sb.3gtms.com",
+        "authenticated": bool(sess),
+        "mode": _mode(),
+        "loginRequired": _login_required(),
+        "user": sess["user"] if sess else None,
     })
+
+
+@app.post("/api/login")
+def login():
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    if not username or not password:
+        return jsonify({"error": "username and password are required"}), 400
+
+    if _mode() == "fixtures":
+        # Demo login: no real 3G call, serve fixtures after "auth".
+        token = _new_session(username, client=None)
+        return _set_cookie(jsonify({"ok": True, "mode": "fixtures", "user": username}), token)
+
+    # Live: authenticate to the sandbox via Playwright. Password is used here and
+    # not retained. Never logged.
+    try:
+        from tms_client import TmsClient
+        client = TmsClient(sandbox=True)  # sandbox-only, enforced in the client
+        client.login(username, password)
+    except Exception as exc:  # noqa: BLE001 - surface a generic auth failure
+        # Do not echo credentials or internal detail beyond a short reason.
+        return jsonify({"error": "login failed", "detail": str(exc)[:200]}), 401
+    finally:
+        password = None  # drop the plaintext reference promptly
+
+    token = _new_session(username, client=client)
+    return _set_cookie(jsonify({"ok": True, "mode": "live", "user": username}), token)
+
+
+@app.post("/api/logout")
+def logout():
+    token, _ = _current_session()
+    if token:
+        _SESSIONS.pop(token, None)
+    resp = jsonify({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
+
+
+def _require_session():
+    """Return (session, error_response). error_response is None when OK."""
+    if not _login_required():
+        return None, None
+    _, sess = _current_session()
+    if not sess:
+        return None, (jsonify({"error": "not authenticated"}), 401)
+    return sess, None
 
 
 @app.get("/api/loads")
 def loads():
+    sess, err = _require_session()
+    if err:
+        return err
     page = int(request.args.get("page", 1))
     page_size = int(request.args.get("pageSize", 50))
     saved_query_id = request.args.get("savedQueryId", "")
 
-    if _use_fixtures():
+    if _mode() == "fixtures":
         return jsonify({**_fixture("loads.json"), "_mode": "fixtures"})
 
     if not saved_query_id:
         return jsonify({"error": "savedQueryId is required for live loads"}), 400
     try:
-        data = _client().list_loads(saved_query_id, pagenum=page, pagesize=page_size)
-        return jsonify({"Rows": _rows(data), "_mode": "live-sandbox", "_raw": data})
-    except Exception as exc:  # surface, don't leak internals
-        return jsonify({"error": str(exc), "_mode": "live-sandbox"}), 502
+        data = sess["client"].list_loads(saved_query_id, pagenum=page, pagesize=page_size)
+        return jsonify({"Rows": _rows(data), "_mode": "live-sandbox"})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)[:200], "_mode": "live-sandbox"}), 502
 
 
 @app.get("/api/orders")
 def orders():
+    sess, err = _require_session()
+    if err:
+        return err
     page = int(request.args.get("page", 1))
     page_size = int(request.args.get("pageSize", 50))
 
-    if _use_fixtures():
+    if _mode() == "fixtures":
         return jsonify({**_fixture("orders.json"), "_mode": "fixtures"})
 
     try:
-        data = _client().list_orders(pagenum=page, pagesize=page_size)
-        return jsonify({"Rows": _rows(data), "_mode": "live-sandbox", "_raw": data})
-    except Exception as exc:
-        return jsonify({"error": str(exc), "_mode": "live-sandbox"}), 502
+        data = sess["client"].list_orders(pagenum=page, pagesize=page_size)
+        return jsonify({"Rows": _rows(data), "_mode": "live-sandbox"})
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)[:200], "_mode": "live-sandbox"}), 502
 
 
 def _rows(data):
@@ -122,4 +223,10 @@ def _rows(data):
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=int(os.environ.get("PORT", 5001)), debug=True)
+    # Debug off by default: the Werkzeug interactive debugger can expose request
+    # locals (incl. a submitted password) on an exception. Opt in with FLASK_DEBUG=1.
+    app.run(
+        host="127.0.0.1",
+        port=int(os.environ.get("PORT", 5001)),
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+    )

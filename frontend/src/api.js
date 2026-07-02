@@ -3,27 +3,42 @@
 // override with VITE_API_BASE when the Worker lives on a different origin.
 const BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '')
 
-async function getJson(path) {
-  const res = await fetch(`${BASE}${path}`)
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error || `${res.status} ${res.statusText}`)
-  }
-  return res.json()
+// credentials:'include' sends the httpOnly session cookie (needed cross-origin).
+async function req(path, opts = {}) {
+  const res = await fetch(`${BASE}${path}`, { credentials: 'include', ...opts })
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`)
+  return body
 }
 
 export function fetchHealth() {
-  return getJson('/health')
+  return req('/health')
+}
+
+export function fetchSession() {
+  return req('/session')
+}
+
+export function login(username, password) {
+  return req('/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export function logout() {
+  return req('/logout', { method: 'POST' })
 }
 
 export function fetchLoads({ savedQueryId = '', page = 1 } = {}) {
   const q = new URLSearchParams({ savedQueryId, page: String(page) })
-  return getJson(`/loads?${q}`)
+  return req(`/loads?${q}`)
 }
 
 export function fetchOrders({ page = 1 } = {}) {
   const q = new URLSearchParams({ page: String(page) })
-  return getJson(`/orders?${q}`)
+  return req(`/orders?${q}`)
 }
 
 // Normalize the various row wrappers 3G grids use into a plain array.

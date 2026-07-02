@@ -22,10 +22,27 @@ Browser ──▶ Cloudflare Pages (React UI)
 - **No secrets in the repo.** The live session cookie is a Worker secret set
   out-of-band.
 
-## Why a session cookie (not Playwright) in prod
+## Two ways to authenticate
 
-Workers can't run Playwright. For live data the Worker calls the sandbox with an
-injected **`TMS_SESSION_COOKIE`**. That cookie expires, so rotate it with the
+Workers can't run Playwright, so pick one:
+
+- **Login screen (UI credentials) → requires `BACKEND_URL`.** Deploy the Flask
+  backend somewhere it can reach the sandbox and run Playwright, set the Worker
+  secret `BACKEND_URL` to it, and the Worker proxies the whole `/api/*` surface
+  (including `/api/login`, cookies both ways). Users sign in from the browser.
+- **Injected session cookie (no backend) → `TMS_SESSION_COOKIE`.** The Worker
+  calls the sandbox directly with a pre-captured cookie rotated by
+  `refresh_session.py`. **Data-only — there is no login screen in this mode**
+  (`/api/login` returns `501`).
+
+For the login screen, use `BACKEND_URL`. Cookie flow across origins is simplest
+when the Worker is routed **same-origin** under the Pages domain (`/api/*`); if
+the Worker is on its own domain, set `ALLOWED_ORIGIN` to the Pages URL and note
+the session cookie must be `SameSite=None; Secure` to survive cross-site.
+
+## Session cookie (cookie-only mode)
+
+For the data-only `TMS_SESSION_COOKIE` mode, rotate the cookie with the
 Playwright-based `refresh_session.py`, run from a host that *can* reach the
 sandbox and holds the encrypted credentials.
 
