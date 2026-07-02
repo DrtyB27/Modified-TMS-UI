@@ -6,34 +6,45 @@
  * serves B.R.A.T.'s PRODUCTION rating/quoting traffic. This wireframe's
  * sandbox-pointed traffic must stay physically isolated from any tool people
  * rely on for live quoting. Deploy this as its own Worker (its own name, route,
- * and secrets). It is fine that the session-auth handling below was *seeded*
- * from the B.R.A.T. Worker — but this is a copy, on its own deployment.
+ * and secrets).
  *
  * HARD RULES
  *  - Sandbox host ONLY: shipdlx-sb.3gtms.com. Never production.
- *  - Read-only: only the loadList / orderList endpoints are proxied; any path
+ *  - Read-only: only the loadList / orderList data endpoints reach 3G; any path
  *    containing a write verb is rejected.
  *
- * This is a starting-point skeleton. In practice the heavy lifting (Playwright
- * login) can't run in a Worker; the Worker either (a) proxies to the Flask
- * backend, or (b) reuses a session cookie injected as a secret. Both paths are
- * sketched below. Secrets (TMS_SESSION_COOKIE / BACKEND_URL) are set via
- * `wrangler secret put` — never hard-coded.
+ * TWO MODES
+ *  1. BACKEND_URL set (required for the LOGIN SCREEN): proxy the whole /api/*
+ *     surface to the Flask backend, which does the Playwright login and holds
+ *     the session. Method, body, and cookies are forwarded both ways. This is
+ *     the mode to use when the UI collects credentials.
+ *  2. TMS_SESSION_COOKIE set (no backend): the Worker calls the sandbox directly
+ *     with an injected session cookie. Data-only — it CANNOT do UI login, so
+ *     /api/login returns 501 here.
+ *
+ * Secrets (via `wrangler secret put`, never committed):
+ *   BACKEND_URL          URL of the Flask proxy (enables login)
+ *   TMS_SESSION_COOKIE   alt: injected sandbox session cookie (data-only)
  */
 
 const SANDBOX_ORIGIN = 'https://shipdlx-sb.3gtms.com'
 const PRODUCTION_ORIGIN = 'https://shipdlx.3gtms.com' // for the guard only
 
-const ALLOWED_3G_PATHS = new Set(['/web/loadList/tab0', '/web/orderList'])
+// Public API surface the Worker will forward to a backend.
+const ALLOWED_API = new Set([
+  '/api/health', '/api/session', '/api/login', '/api/logout',
+  '/api/loads', '/api/orders',
+])
 const FORBIDDEN_TOKENS = [
   'save', 'create', 'plan', 'unplan', 'assign', 'delete', 'remove',
-  'cancel', 'send', 'update', 'add', 'commit', 'tender', 'book',
+  'cancel', 'send', 'update', 'commit', 'tender', 'book',
 ]
 
-function isReadOnly(path) {
-  const lower = path.toLowerCase()
+function apiPathAllowed(path) {
+  const clean = path.replace(/\/$/, '')
+  const lower = clean.toLowerCase()
   if (FORBIDDEN_TOKENS.some((t) => lower.includes(t))) return false
-  return ALLOWED_3G_PATHS.has(path.replace(/\/$/, ''))
+  return ALLOWED_API.has(clean)
 }
 
 export default {
@@ -41,7 +52,6 @@ export default {
     const url = new URL(request.url)
     const cors = corsHeaders(request, env)
 
-    // CORS preflight (frontend on a Pages domain calling the Worker).
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: cors })
     }
@@ -52,35 +62,51 @@ export default {
     }
     const origin = env.TMS_ORIGIN || SANDBOX_ORIGIN
 
+    if (!url.pathname.startsWith('/api/')) {
+      return json({ error: 'not found' }, 404, cors)
+    }
+    if (!apiPathAllowed(url.pathname)) {
+      return json({ error: 'read-only violation' }, 403, cors)
+    }
+
+    // Mode 1: hand the whole /api surface to the Playwright-capable backend.
+    if (env.BACKEND_URL) {
+      const target = new URL(url.pathname + url.search, env.BACKEND_URL)
+      const backendResp = await fetch(target, {
+        method: request.method,
+        headers: forwardHeaders(request),
+        body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+        redirect: 'manual',
+      })
+      return withCors(backendResp, cors) // preserves Set-Cookie from the backend
+    }
+
+    // Health works without a backend (reports how the Worker is configured).
     if (url.pathname === '/api/health') {
       return json({
         ok: true,
-        mode: env.BACKEND_URL ? 'worker->backend' : (env.TMS_SESSION_COOKIE ? 'worker-live' : 'worker-unconfigured'),
+        mode: env.TMS_SESSION_COOKIE ? 'worker-live' : 'worker-unconfigured',
         host: new URL(origin).host,
       }, 200, cors)
     }
 
-    // Map the public API onto the read-only 3G endpoints.
-    const route = {
-      '/api/loads': '/web/loadList/tab0',
-      '/api/orders': '/web/orderList',
-    }[url.pathname]
-
-    if (!route) return json({ error: 'not found' }, 404, cors)
-    if (!isReadOnly(route)) return json({ error: 'read-only violation' }, 403, cors)
-
-    // Preferred: hand off to the Flask backend (which does the Playwright login).
-    if (env.BACKEND_URL) {
-      const target = new URL(url.pathname + url.search, env.BACKEND_URL)
-      const r = await fetch(target, { headers: { accept: 'application/json' } })
-      return withCors(r, cors)
+    // Mode 2 (cookie-only) has no login capability.
+    if (url.pathname === '/api/login' || url.pathname === '/api/logout' || url.pathname === '/api/session') {
+      if (url.pathname === '/api/session') {
+        return json({ authenticated: !!env.TMS_SESSION_COOKIE, mode: 'worker-live', loginRequired: false }, 200, cors)
+      }
+      return json({
+        error: 'Login requires BACKEND_URL (a Playwright-capable backend). This Worker is in cookie-only mode.',
+      }, 501, cors)
     }
 
-    // Live (Cloudflare-native): direct sandbox call using an injected session
-    // cookie secret. Refresh the cookie with skills/3g-tms-browser/refresh_session.py.
+    // Mode 2: direct sandbox data call with the injected session cookie.
     if (!env.TMS_SESSION_COOKIE) {
       return json({ error: 'No BACKEND_URL or TMS_SESSION_COOKIE configured.' }, 500, cors)
     }
+    const route = { '/api/loads': '/web/loadList/tab0', '/api/orders': '/web/orderList' }[url.pathname]
+    if (!route) return json({ error: 'not found' }, 404, cors)
+
     const page = url.searchParams.get('page') || '1'
     const pageSize = url.searchParams.get('pageSize') || '50'
     const start = (Number(page) - 1) * Number(pageSize)
@@ -105,8 +131,6 @@ export default {
       },
       body,
     })
-    // A 3G session that has expired redirects to /login (HTML). Surface that as
-    // a clear 401 so the operator knows to refresh TMS_SESSION_COOKIE.
     const text = await resp.text()
     const looksLikeLogin = /<html/i.test(text) && /login/i.test(text)
     if (resp.status >= 400 || looksLikeLogin) {
@@ -123,17 +147,33 @@ export default {
   },
 }
 
-// CORS: allow the configured Pages origin (ALLOWED_ORIGIN) or fall back to the
-// request Origin. This is our own proxy talking to our own frontend — never 3G.
+// Forward the client's method/body context to the backend: cookies (session),
+// content-type, and accept. Drop hop-by-hop / host headers.
+function forwardHeaders(request) {
+  const h = new Headers()
+  const cookie = request.headers.get('cookie')
+  const ct = request.headers.get('content-type')
+  if (cookie) h.set('cookie', cookie)
+  if (ct) h.set('content-type', ct)
+  h.set('accept', 'application/json')
+  return h
+}
+
+// CORS: allow the configured Pages origin (ALLOWED_ORIGIN) or reflect the
+// request Origin. Credentials are allowed so the session cookie flows. This is
+// our own proxy talking to our own frontend — never 3G.
 function corsHeaders(request, env) {
   const reqOrigin = request.headers.get('Origin') || ''
   const allow = env.ALLOWED_ORIGIN || reqOrigin || '*'
-  return {
+  const headers = {
     'access-control-allow-origin': allow,
-    'access-control-allow-methods': 'GET,OPTIONS',
+    'access-control-allow-methods': 'GET,POST,OPTIONS',
     'access-control-allow-headers': 'content-type',
     'vary': 'Origin',
   }
+  // Credentialed CORS requires a specific origin (not '*').
+  if (allow !== '*') headers['access-control-allow-credentials'] = 'true'
+  return headers
 }
 
 function withCors(resp, cors) {

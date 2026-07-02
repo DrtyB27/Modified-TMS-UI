@@ -33,6 +33,13 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 The header badge shows **FIXTURES (offline)** vs **LIVE SANDBOX**.
 
+To exercise the **login screen** offline, run the backend with
+`USE_FIXTURES=1 LOGIN_REQUIRED=1` — any username/password signs in and shows
+sample data. In live mode the login is real: credentials are used once to open a
+3G sandbox session, the browser keeps only an `httpOnly` session cookie, and
+nothing is stored or logged. The UI login requires the Flask backend (a Worker
+can't run Playwright) — see `DEPLOY.md`.
+
 ## Going live (needs sandbox access + credentials)
 
 ```bash

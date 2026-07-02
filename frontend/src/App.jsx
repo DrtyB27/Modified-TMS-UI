@@ -1,15 +1,38 @@
 import { useEffect, useState } from 'react'
-import { fetchHealth, fetchLoads, fetchOrders, rowsOf } from './api.js'
+import { fetchSession, fetchLoads, fetchOrders, logout, rowsOf } from './api.js'
 import { Column } from './components/Column.jsx'
 import { LoadCard } from './components/LoadCard.jsx'
 import { OrderCard } from './components/OrderCard.jsx'
+import { Login } from './components/Login.jsx'
 
 // Saved query that scopes the Loads grid. Swap for a real sandbox savedQueryId
 // when running live; ignored in fixtures mode.
 const SAVED_QUERY_ID = new URLSearchParams(location.search).get('savedQueryId') || 'demo'
 
 export default function App() {
-  const [health, setHealth] = useState(null)
+  const [session, setSession] = useState(null) // {authenticated, mode, loginRequired, user}
+  const [booting, setBooting] = useState(true)
+
+  useEffect(() => {
+    fetchSession()
+      .then(setSession)
+      .catch(() => setSession({ authenticated: false, mode: 'unknown', loginRequired: true }))
+      .finally(() => setBooting(false))
+  }, [])
+
+  if (booting) {
+    return <div className="p-6 text-sm text-slate-500">Loading…</div>
+  }
+
+  const needsLogin = session.loginRequired && !session.authenticated
+  if (needsLogin) {
+    return <Login mode={session.mode} onLoggedIn={(r) => setSession({ ...session, authenticated: true, user: r.user })} />
+  }
+
+  return <Dashboard session={session} onLogout={() => setSession({ ...session, authenticated: false, user: null })} />
+}
+
+function Dashboard({ session, onLogout }) {
   const [loads, setLoads] = useState([])
   const [orders, setOrders] = useState([])
   const [error, setError] = useState(null)
@@ -21,13 +44,11 @@ export default function App() {
       setLoading(true)
       setError(null)
       try {
-        const [h, l, o] = await Promise.all([
-          fetchHealth(),
+        const [l, o] = await Promise.all([
           fetchLoads({ savedQueryId: SAVED_QUERY_ID }),
           fetchOrders({}),
         ])
         if (!alive) return
-        setHealth(h)
         setLoads(rowsOf(l))
         setOrders(rowsOf(o))
       } catch (e) {
@@ -40,6 +61,13 @@ export default function App() {
     return () => { alive = false }
   }, [])
 
+  async function doLogout() {
+    try { await logout() } catch { /* ignore */ }
+    onLogout()
+  }
+
+  const live = session.mode === 'live'
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b border-slate-200 bg-white px-6 py-4">
@@ -51,20 +79,27 @@ export default function App() {
               <span className="font-mono">shipdlx-sb.3gtms.com</span>.
             </p>
           </div>
-          {health && (
+          <div className="flex items-center gap-3">
             <span
               className={`rounded-full px-3 py-1 text-xs font-medium ${
-                health.mode === 'live-sandbox'
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-amber-100 text-amber-800'
+                live ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
               }`}
-              title={health.mode === 'fixtures'
-                ? 'Serving local fixtures (no live sandbox egress / credentials).'
-                : 'Live sandbox data.'}
+              title={live ? 'Live sandbox data.' : 'Serving local fixtures (offline).'}
             >
-              {health.mode === 'live-sandbox' ? 'LIVE SANDBOX' : 'FIXTURES (offline)'}
+              {live ? 'LIVE SANDBOX' : 'FIXTURES (offline)'}
             </span>
-          )}
+            {session.user && (
+              <span className="text-xs text-slate-500">{session.user}</span>
+            )}
+            {session.loginRequired && (
+              <button
+                onClick={doLogout}
+                className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100"
+              >
+                Sign out
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
