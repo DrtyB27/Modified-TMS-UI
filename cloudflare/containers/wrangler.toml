@@ -15,9 +15,10 @@ compatibility_flags = ["nodejs_compat"]
 class_name = "Backend"
 image = "../../Dockerfile"       # build context is the repo root
 max_instances = 1                # single instance: in-memory sessions stay consistent
-# Chromium is memory-hungry — use a larger instance. Check `wrangler containers
-# instances` for the sizes available on your account and adjust.
-instance_type = "standard"
+# Chromium is memory-hungry — use a larger instance. "standard-1" (was
+# "standard") is a good default; check `wrangler containers` for sizes on your
+# account and adjust if needed.
+instance_type = "standard-1"
 
 [[durable_objects.bindings]]
 name = "BACKEND"
