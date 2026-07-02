@@ -26,10 +26,12 @@ Browser ──▶ Cloudflare Pages (React UI)
 
 Workers can't run Playwright, so pick one:
 
-- **Login screen (UI credentials) → requires `BACKEND_URL`.** Deploy the Flask
-  backend somewhere it can reach the sandbox and run Playwright, set the Worker
-  secret `BACKEND_URL` to it, and the Worker proxies the whole `/api/*` surface
-  (including `/api/login`, cookies both ways). Users sign in from the browser.
+- **Login screen (UI credentials).** Users sign in from the browser; a
+  Playwright-capable backend does the 3G login. Host that backend on **Cloudflare
+  Containers** (recommended — all-Cloudflare, see below) or anywhere it can reach
+  the sandbox, then front it with a Worker. The `cloudflare/worker.js`
+  `BACKEND_URL` mode proxies `/api/*` to an off-Cloudflare backend; the
+  `cloudflare/containers/` deployment bundles the backend as a container.
 - **Injected session cookie (no backend) → `TMS_SESSION_COOKIE`.** The Worker
   calls the sandbox directly with a pre-captured cookie rotated by
   `refresh_session.py`. **Data-only — there is no login screen in this mode**
@@ -39,6 +41,27 @@ For the login screen, use `BACKEND_URL`. Cookie flow across origins is simplest
 when the Worker is routed **same-origin** under the Pages domain (`/api/*`); if
 the Worker is on its own domain, set `ALLOWED_ORIGIN` to the Pages URL and note
 the session cookie must be `SameSite=None; Secure` to survive cross-site.
+
+## Host the backend on Cloudflare Containers (recommended for the login screen)
+
+Runs the Flask + Playwright backend as a Cloudflare Container behind a router
+Worker — all on Cloudflare, no separate VM. Needs Docker locally (or a CI runner
+with Docker) + `wrangler login`.
+
+```bash
+cd cloudflare/containers
+npm install
+npm run deploy     # builds ../../Dockerfile, pushes image, deploys Worker+Container
+curl https://<worker-domain>/api/health   # -> {"mode":"live",...}
+```
+
+Then front it: route this Worker **same-origin** under the Pages domain
+(`/api/*`, recommended so the session cookie is first-party), or set
+`VITE_API_BASE` to the Worker URL and `FRONTEND_ORIGIN` (in the `Backend` class
+`envVars`) to the Pages URL. No secrets — credentials come from the login form.
+Details: `cloudflare/containers/README.md`. Notes: single instance keeps
+in-memory sessions consistent; Chromium wants a `standard` instance; the first
+login after idle pays a cold start.
 
 ## Session cookie (cookie-only mode)
 

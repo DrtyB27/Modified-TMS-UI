@@ -1,0 +1,18 @@
+# Keep the image small: only backend/ + skills/ are copied.
+.git
+frontend
+cloudflare
+docs
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.venv
+**/venv
+**/dist
+*.md
+# never ship secrets/captures
+**/*.enc
+**/*.key
+**/.env
+**/.env.*
+**/orderlist_capture.json
