@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DLX × 3G TMS — System Status</title>
+<style>
+  :root { color-scheme: dark light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 15px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0f172a; color: #e2e8f0; padding: 24px;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .sub { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
+  .card {
+    border: 1px solid #1e293b; border-radius: 12px; background: #111a2e;
+    padding: 14px 16px; margin-bottom: 12px; display: flex; gap: 14px; align-items: flex-start;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 999px; margin-top: 5px; flex: none; background: #64748b; }
+  .dot.ok { background: #22c55e; box-shadow: 0 0 0 4px rgba(34,197,94,.15); }
+  .dot.warn { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,.15); }
+  .dot.bad { background: #ef4444; box-shadow: 0 0 0 4px rgba(239,68,68,.15); }
+  .dot.pending { background: #64748b; animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .body { flex: 1; min-width: 0; }
+  .name { font-weight: 600; }
+  .msg { color: #94a3b8; font-size: 13px; margin-top: 2px; }
+  .msg code { background: #0b1220; padding: 1px 6px; border-radius: 5px; color: #cbd5e1; word-break: break-all; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; }
+  button {
+    background: #2563eb; color: #fff; border: 0; border-radius: 9px; padding: 8px 14px;
+    font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  .verdict { border-radius: 12px; padding: 14px 16px; margin: 18px 0 8px; font-weight: 600; }
+  .verdict.ok { background: rgba(34,197,94,.12); border: 1px solid #14532d; color: #86efac; }
+  .verdict.warn { background: rgba(245,158,11,.12); border: 1px solid #78350f; color: #fcd34d; }
+  .verdict.bad { background: rgba(239,68,68,.12); border: 1px solid #7f1d1d; color: #fca5a5; }
+  a { color: #93c5fd; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>DLX × 3G TMS — System Status</h1>
+  <div class="sub">Read-only sandbox wireframe · checks each hop of the request chain</div>
+
+  <div class="toolbar">
+    <button id="run">Re-check</button>
+    <span id="spin" class="sub" style="margin:0"></span>
+  </div>
+
+  <div id="verdict"></div>
+
+  <div id="cards"></div>
+
+  <p class="sub" style="margin-top:18px">
+    The backend runs in a container that scales to zero, so the first check after
+    it's been idle can take ~30–90s to wake. This page auto-retries the container
+    check a few times before giving up.
+  </p>
+</div>
+
+<script>
+const STEPS = [
+  {
+    key: 'proxy',
+    name: 'Edge proxy → Backend Worker',
+    detail: 'Pages Function reaches the Worker (via service binding)',
+    // /api/xyz is handled by the Worker itself and should be blocked read-only.
+    run: async () => {
+      const r = await fetch('/api/xyz', { credentials: 'include' });
+      const ct = r.headers.get('content-type') || '';
+      if (r.status === 403 && ct.includes('json')) return { state: 'ok', msg: 'Worker responding (read-only guard active).' };
+      if (ct.includes('json')) return { state: 'ok', msg: 'Worker responding (HTTP ' + r.status + ').' };
+      return { state: 'bad', msg: 'Not reaching the Worker — got HTTP ' + r.status + ' (' + (ct || 'no content-type') + ').' };
+    },
+  },
+  {
+    key: 'container',
+    name: 'Backend container (Flask)',
+    detail: '/api/health → the Playwright container',
+    retries: 6,
+    run: async () => {
+      const r = await fetch('/api/health', { credentials: 'include' });
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('json')) return { state: 'retry', msg: 'No response yet — container waking (HTTP ' + r.status + ')…' };
+      const b = await r.json();
+      if (b.ok) return { state: 'ok', msg: 'Container healthy · mode <code>' + (b.mode || '?') + '</code> · host <code>' + (b.host || '?') + '</code>' };
+      return { state: 'bad', msg: 'Container reachable but unhealthy: <code>' + JSON.stringify(b) + '</code>' };
+    },
+  },
+  {
+    key: 'session',
+    name: '3G sandbox session',
+    detail: '/api/session → login state',
+    run: async () => {
+      const r = await fetch('/api/session', { credentials: 'include' });
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('json')) return { state: 'warn', msg: 'Not available (container not up yet).' };
+      const b = await r.json();
+      if (b.authenticated) return { state: 'ok', msg: 'Signed in as <code>' + (b.user || '?') + '</code> · mode <code>' + b.mode + '</code>' };
+      return { state: 'warn', msg: 'Not signed in yet · mode <code>' + (b.mode || '?') + '</code> · <a href="/">go to login</a>' };
+    },
+  },
+];
+
+const cards = document.getElementById('cards');
+const verdictEl = document.getElementById('verdict');
+const runBtn = document.getElementById('run');
+const spin = document.getElementById('spin');
+
+function render(results) {
+  cards.innerHTML = STEPS.map((s) => {
+    const res = results[s.key] || { state: 'pending', msg: 'Checking…' };
+    return `<div class="card">
+      <div class="dot ${res.state === 'retry' ? 'pending' : res.state}"></div>
+      <div class="body">
+        <div class="name">${s.name}</div>
+        <div class="msg">${res.msg || s.detail}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function runStep(step, results) {
+  const tries = step.retries || 1;
+  for (let i = 0; i < tries; i++) {
+    let res;
+    try { res = await step.run(); }
+    catch (e) { res = { state: 'retry', msg: 'Error: ' + e.message }; }
+    if (res.state !== 'retry') { results[step.key] = res; render(results); return; }
+    results[step.key] = { state: 'retry', msg: (res.msg || 'Waking…') + '  (attempt ' + (i + 1) + '/' + tries + ')' };
+    render(results);
+    if (i < tries - 1) await sleep(12000);
+  }
+  // Ran out of retries.
+  const last = results[step.key];
+  results[step.key] = { state: 'bad', msg: (last && last.msg ? last.msg + '  ' : '') + 'Gave up — container did not respond.' };
+  render(results);
+}
+
+async function runAll() {
+  runBtn.disabled = true; spin.textContent = 'checking…';
+  verdictEl.innerHTML = '';
+  const results = {};
+  render(results);
+  for (const step of STEPS) await runStep(step, results);
+  const states = STEPS.map((s) => results[s.key].state);
+  if (states.every((s) => s === 'ok')) {
+    verdictEl.className = 'verdict ok';
+    verdictEl.textContent = '✅ All systems go — open the app and sign in.';
+  } else if (results.proxy.state === 'ok' && results.container.state !== 'ok') {
+    verdictEl.className = 'verdict warn';
+    verdictEl.innerHTML = '⏳ Frontend + Worker are healthy; the container isn’t answering. If it was idle, hit Re-check once more to let it finish waking.';
+  } else {
+    verdictEl.className = 'verdict bad';
+    verdictEl.textContent = '⚠️ Something upstream is down — see the red card above.';
+  }
+  runBtn.disabled = false; spin.textContent = '';
+}
+
+runBtn.addEventListener('click', runAll);
+runAll();
+</script>
+</body>
+</html>
