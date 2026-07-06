@@ -6,8 +6,13 @@
  * in Safari/Chrome without third-party-cookie exemptions. This forwards /api/*
  * to the backend container Worker server-side.
  *
- * Config: set a Pages environment variable
- *   BACKEND_ORIGIN = https://dlx-tms-sandbox-backend.<account>.workers.dev
+ * Reaching the backend Worker — two ways, in priority order:
+ *   1. Service binding `BACKEND` (preferred): add a Pages Functions service
+ *      binding named BACKEND -> the dlx-tms-sandbox-backend Worker. This calls
+ *      the Worker directly over Cloudflare's internal network — no public URL,
+ *      works even when the account's workers.dev routing is broken.
+ *   2. Public URL fallback: set env var
+ *      BACKEND_ORIGIN = https://dlx-tms-sandbox-backend.<account>.workers.dev
  *
  * Read-only allow-list here is defense-in-depth; the Python client is the real
  * guard. Sandbox-only is enforced downstream too.
@@ -32,12 +37,23 @@ export async function onRequest(context) {
   const { request, env } = context
   const url = new URL(request.url)
 
-  const backend = env.BACKEND_ORIGIN
-  if (!backend) {
-    return json({ error: 'BACKEND_ORIGIN is not set on the Pages project.' }, 500)
-  }
   if (!apiPathAllowed(url.pathname)) {
     return json({ error: 'read-only violation' }, 403)
+  }
+
+  // 1. Preferred: service binding — call the Worker directly (no public URL).
+  if (env.BACKEND && typeof env.BACKEND.fetch === 'function') {
+    const resp = await env.BACKEND.fetch(request)
+    return new Response(resp.body, { status: resp.status, headers: resp.headers })
+  }
+
+  // 2. Fallback: public URL via BACKEND_ORIGIN.
+  const backend = env.BACKEND_ORIGIN
+  if (!backend) {
+    return json({
+      error: 'No backend configured: add a `BACKEND` service binding (preferred) '
+        + 'or set BACKEND_ORIGIN on the Pages project.',
+    }, 500)
   }
 
   const target = backend.replace(/\/$/, '') + url.pathname + url.search
