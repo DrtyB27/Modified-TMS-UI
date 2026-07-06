@@ -15,6 +15,14 @@ workers_dev = true
 compatibility_date = "2025-09-15"
 compatibility_flags = ["nodejs_compat"]
 
+# Capture Worker + container stdout/stderr so we can see gunicorn/Flask boot
+# output (and any startup traceback) in the dashboard Logs tab.
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+
 [[containers]]
 class_name = "Backend"
 image = "../../Dockerfile"       # build context is the repo root
