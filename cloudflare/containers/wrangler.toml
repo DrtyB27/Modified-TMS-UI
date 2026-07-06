@@ -7,6 +7,10 @@
 
 name = "dlx-tms-sandbox-backend"
 main = "worker.js"
+# Serve the Worker on its <name>.<subdomain>.workers.dev URL (the Pages Function
+# calls this as BACKEND_ORIGIN). Enables the route on deploy so it doesn't depend
+# on the dashboard toggle.
+workers_dev = true
 # Containers need a recent runtime + Node compat.
 compatibility_date = "2025-09-15"
 compatibility_flags = ["nodejs_compat"]
