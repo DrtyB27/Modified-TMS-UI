@@ -15,9 +15,13 @@ WORKDIR /app
 COPY backend/ /app/backend/
 COPY skills/3g-tms-browser/ /app/skills/3g-tms-browser/
 
-# Flask/requests/cryptography/flask-cors + a production WSGI server.
-# (Playwright + Chromium already come from the base image.)
-RUN pip install -r /app/backend/requirements.txt gunicorn
+# Flask/requests/cryptography/flask-cors + a production WSGI server, plus
+# Playwright pinned to the base image's version. The base image bundles Chromium
+# for Playwright 1.48.0, but its Playwright pip package isn't importable from the
+# same Python that gunicorn uses — so install a matching version here (browsers
+# already present at PLAYWRIGHT_BROWSERS_PATH, so no re-download needed).
+RUN pip install -r /app/backend/requirements.txt gunicorn playwright==1.48.0 \
+ && python -c "from playwright.sync_api import sync_playwright; print('playwright import OK')"
 
 # Live mode with the login gate on; Secure cookie behind Cloudflare TLS.
 ENV USE_FIXTURES=0 \
