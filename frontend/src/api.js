@@ -20,7 +20,12 @@ async function req(path, opts = {}) {
     )
   }
   const body = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    const msg = body.error
+      ? body.error + (body.detail ? ' — ' + body.detail : '')
+      : `${res.status} ${res.statusText}`
+    throw new Error(msg)
+  }
   return body
 }
 

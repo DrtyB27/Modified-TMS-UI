@@ -144,11 +144,65 @@ class TmsClient:
                 context = browser.new_context()
                 page = context.new_page()
                 page.goto(login_url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
-                page.fill(self.username_selector, username)
-                page.fill(self.password_selector, password)
-                page.click(self.submit_selector)
-                # A landed session leaves the /login page; wait for navigation.
+
+                # Anchor on the password field — every login form has exactly one.
+                pw = page.locator("input[type='password']").first
+                pw.wait_for(state="visible", timeout=self.timeout * 1000)
+
+                # Username: try named guesses, then any visible non-password text
+                # input. This is resilient to whatever the sandbox names its field.
+                user_selectors = [
+                    "input[name='username']", "input#username", "input[name='j_username']",
+                    "input[name='userName']", "input[name='user']", "input[name='email']",
+                    "input[name='login']", "input[type='email']",
+                    "input[type='text']:visible", "input:not([type]):visible",
+                ]
+                user_field = None
+                for sel in user_selectors:
+                    loc = page.locator(sel).first
+                    try:
+                        if loc.count() > 0:
+                            user_field = loc
+                            break
+                    except Exception:
+                        continue
+                if user_field is None:
+                    raise RuntimeError("Could not locate a username field on the login form.")
+
+                user_field.fill(username)
+                pw.fill(password)
+
+                # Submit: a submit control if present, else Enter in the password box.
+                clicked = False
+                for sel in [
+                    "button[type='submit']", "input[type='submit']",
+                    "button:has-text('Log In')", "button:has-text('Login')",
+                    "button:has-text('Sign In')", "button:has-text('Sign in')",
+                ]:
+                    b = page.locator(sel).first
+                    try:
+                        if b.count() > 0:
+                            b.click()
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+                if not clicked:
+                    pw.press("Enter")
+
+                # A successful login navigates away from /web/login.
+                try:
+                    page.wait_for_url(lambda u: "/web/login" not in u, timeout=self.timeout * 1000)
+                except Exception:
+                    pass
                 page.wait_for_load_state("networkidle", timeout=self.timeout * 1000)
+
+                # Verify we actually left the login page (else creds/selectors failed).
+                if "/web/login" in page.url:
+                    raise RuntimeError(
+                        "Still on the login page after submit — login was rejected "
+                        "(check credentials, or the form structure differs)."
+                    )
 
                 cookies = context.cookies()
             finally:
