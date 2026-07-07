@@ -61,26 +61,16 @@ export default {
       })
     }
     // Single, sticky instance so the in-memory session store is consistent.
-    // Catch container errors and surface them as readable JSON (instead of an
-    // opaque 404) so the /status page shows the real failure reason.
-    let resp
+    // Pass the container's response straight through — the Flask app already
+    // returns meaningful JSON (including its own 4xx/5xx error bodies with the
+    // real 3G error). Only wrap the case where the container is truly
+    // unreachable (getContainer throws), so that surfaces as JSON, not a 1101.
     try {
-      resp = await getContainer(env.BACKEND, 'singleton').fetch(request)
+      return await getContainer(env.BACKEND, 'singleton').fetch(request)
     } catch (err) {
       const detail = String((err && err.stack) || err).slice(0, 900)
       console.error('container fetch threw:', detail)
       return json({ error: 'container unavailable (threw)', detail }, 502)
     }
-    // A not-ready / crashed container often replies 404/5xx with an empty body;
-    // wrap those with whatever text it did send so it isn't a blank 404.
-    if (resp.status === 404 || resp.status >= 500) {
-      const text = await resp.clone().text().catch(() => '')
-      console.error('container returned', resp.status, text.slice(0, 300))
-      return json({
-        error: 'container returned HTTP ' + resp.status,
-        detail: text.slice(0, 600) || '(empty body — container not serving on port 8080)',
-      }, 502)
-    }
-    return resp
   },
 }
