@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "dlx-tms-sandbox-backend",
+  "name": "drtytms",
   "compatibility_date": "2026-07-06",
   "observability": {
     "enabled": true
