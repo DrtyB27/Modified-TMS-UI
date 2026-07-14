@@ -50,7 +50,8 @@ FORBIDDEN_ACTIONS = (
 
 # The only endpoints this POC is allowed to reach.
 ALLOWED_PATHS = (
-    "/web/loadList/tab0",
+    "/web/loadList/loadGrid",   # the grid data endpoint (confirmed from live HAR)
+    "/web/loadList/tab0",       # legacy/alt, kept allow-listed
     "/web/orderList",
 )
 
@@ -257,23 +258,26 @@ class TmsClient:
         pagenum: int = 1,
         pagesize: int = 50,
     ) -> Any:
-        """POST /web/loadList/tab0 -> parsed Load records.
+        """POST /web/loadList/loadGrid -> parsed Load records.
 
-        Mirrors the confirmed capture: filterscount/groupscount = 0, paging via
-        recordstartindex/recordendindex, and the saved query that scopes rows.
+        Confirmed from live HAR: the grid endpoint is loadGrid (not tab0), the
+        grid is 0-indexed (pagenum starts at 0), and it carries empty query /
+        quickSearch params plus the saved query that scopes rows.
         """
         recordstartindex = (pagenum - 1) * pagesize
         recordendindex = recordstartindex + pagesize
         data = {
             "filterscount": 0,
             "groupscount": 0,
-            "pagenum": pagenum,
+            "pagenum": pagenum - 1,          # 3G grid is 0-indexed
             "pagesize": pagesize,
             "recordstartindex": recordstartindex,
             "recordendindex": recordendindex,
+            "query": "",
+            "quickSearch": "",
             "savedQueryId": saved_query_id,
         }
-        return self._post("/web/loadList/tab0", data)
+        return self._post("/web/loadList/loadGrid", data)
 
     def list_orders(
         self,
@@ -284,18 +288,15 @@ class TmsClient:
     ) -> Any:
         """POST /web/orderList -> parsed Order records.
 
-        NOTE: the exact param shape for orderList has not yet been captured from
-        live traffic. This sends the same jqGrid-style envelope that loadList
-        uses, which is the documented starting hypothesis. When capturing live
-        (see docs/3G-API-Discovery-Checklist.md), record the real field names
-        and fold any differences back here and into the discovery checklist.
+        Confirmed from live HAR: plain jqGrid envelope, 0-indexed pagenum, no
+        savedQueryId required (savedQueryId optional for a scoped view).
         """
         recordstartindex = (pagenum - 1) * pagesize
         recordendindex = recordstartindex + pagesize
         data: Dict[str, Any] = {
             "filterscount": 0,
             "groupscount": 0,
-            "pagenum": pagenum,
+            "pagenum": pagenum - 1,          # 3G grid is 0-indexed
             "pagesize": pagesize,
             "recordstartindex": recordstartindex,
             "recordendindex": recordendindex,

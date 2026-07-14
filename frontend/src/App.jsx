@@ -7,7 +7,9 @@ import { Login } from './components/Login.jsx'
 
 // Saved query that scopes the Loads grid. Swap for a real sandbox savedQueryId
 // when running live; ignored in fixtures mode.
-const SAVED_QUERY_ID = new URLSearchParams(location.search).get('savedQueryId') || 'demo'
+// Default to the "Purple Loads" saved view (id 8771, confirmed from live HAR).
+// Override per-visit with ?savedQueryId=<id>.
+const SAVED_QUERY_ID = new URLSearchParams(location.search).get('savedQueryId') || '8771'
 
 export default function App() {
   const [session, setSession] = useState(null) // {authenticated, mode, loginRequired, user}
